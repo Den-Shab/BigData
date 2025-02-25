@@ -1,0 +1,89 @@
+version: '3.8'
+
+networks:
+  kafka-net:
+    driver: bridge
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports:
+      - "2181:2181"
+    networks:
+      - kafka-net
+
+  kafka1:
+    image: bitnami/kafka:latest
+    environment:
+      - KAFKA_CFG_BROKER_ID=1
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka1:9092
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+    ports:
+      - "9092:9092"
+    networks:
+      - kafka-net
+    depends_on:
+      zookeeper:
+        condition: service_started
+
+  kafka2:
+    image: bitnami/kafka:latest
+    environment:
+      - KAFKA_CFG_BROKER_ID=2
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka2:9093
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+    ports:
+      - "9093:9093"
+    networks:
+      - kafka-net
+    depends_on:
+      zookeeper:
+        condition: service_started
+
+  producer:
+    build: ./producer
+    command: sh -c "while ! nc -z kafka1 9092 || ! nc -z kafka2 9093; do sleep 2; done; python producer.py"
+    environment:
+      - KAFKA_BROKERS=kafka1:9092,kafka2:9093
+    volumes:
+      - ./producer/diabetes.csv:/app/diabetes.csv
+    networks:
+      - kafka-net
+    depends_on:
+      consumer:
+        condition: service_started
+
+  consumer:
+    build: ./consumer
+    #command: sh -c "sleep 5 && python consumer.py"
+    environment:
+      - KAFKA_BROKERS=kafka1:9092,kafka2:9093
+    volumes:
+      - ./app/models:/app/models
+    networks:
+      - kafka-net
+    depends_on:
+      kafka1:
+        condition: service_started
+      kafka2:
+        condition: service_started
+
+  streamlit:
+    build: ./streamlit
+    networks:
+      - kafka-net
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./app/models:/app/models
+    depends_on:
+      consumer:
+        condition: service_started
